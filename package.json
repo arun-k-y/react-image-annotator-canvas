@@ -1,0 +1,78 @@
+{
+  "name": "react-image-annotator-canvas",
+  "version": "0.1.0",
+  "description": "A generic React canvas component for drawing, selecting, moving, resizing, and labeling rectangular annotations on images. Bring your own categories — use it for ML labeling, visual-diff QA, manuscript markup, or any image-annotation workflow.",
+  "keywords": [
+    "react",
+    "image",
+    "annotation",
+    "annotator",
+    "bounding-box",
+    "canvas",
+    "labeling",
+    "label",
+    "object-detection",
+    "visual-diff",
+    "image-labeling",
+    "computer-vision",
+    "react-component",
+    "typescript",
+    "touch"
+  ],
+  "license": "MIT",
+  "author": "Arun Kumar Yargol",
+  "homepage": "https://github.com/your-github-username/react-image-annotator-canvas#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-github-username/react-image-annotator-canvas.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-github-username/react-image-annotator-canvas/issues"
+  },
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "example": "npm --prefix example run dev",
+    "example:install": "npm --prefix example install",
+    "example:build": "npm --prefix example run build",
+    "prepublishOnly": "npm run typecheck && npm run build"
+  },
+  "peerDependencies": {
+    "react": ">=17",
+    "react-dom": ">=17"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tsup": "^8.3.5",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "sideEffects": false
+}
