@@ -21,13 +21,13 @@
   ],
   "license": "MIT",
   "author": "Arun Kumar Yargol",
-  "homepage": "https://github.com/your-github-username/react-image-annotator-canvas#readme",
+  "homepage": "https://github.com/arun-k-y/react-image-annotator-canvas#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/your-github-username/react-image-annotator-canvas.git"
+    "url": "git+https://github.com/arun-k-y/react-image-annotator-canvas.git"
   },
   "bugs": {
-    "url": "https://github.com/your-github-username/react-image-annotator-canvas/issues"
+    "url": "https://github.com/arun-k-y/react-image-annotator-canvas/issues"
   },
   "type": "module",
   "main": "./dist/index.cjs",
