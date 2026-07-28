@@ -6,6 +6,7 @@ import path from 'node:path'
 // library show up instantly in the dev server with no rebuild step.
 export default defineConfig({
   plugins: [react()],
+  base: './',
   resolve: {
     alias: {
       'react-image-annotator-canvas': path.resolve(__dirname, '../src/index.ts'),
