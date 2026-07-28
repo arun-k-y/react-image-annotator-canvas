@@ -9,6 +9,8 @@ import { DEFAULT_CLOSE_ICON } from './closeIcon'
 
 type Id = string | number
 type CornerName = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+type EdgeName = 'top' | 'right' | 'bottom' | 'left'
+type ResizeHandle = CornerName | EdgeName
 
 interface Point {
   x: number
@@ -24,7 +26,7 @@ interface Draft {
 
 type Interaction =
   | { kind: 'draw'; draft: Draft }
-  | { kind: 'resize'; boxId: Id; corner: CornerName; original: Annotation }
+  | { kind: 'resize'; boxId: Id; handle: ResizeHandle; original: Annotation }
   | {
       kind: 'move'
       boxId: Id
@@ -111,9 +113,35 @@ function hitCorner(
   return found ? found.name : null
 }
 
+function hitEdge(
+  box: Annotation,
+  p: Point,
+  scaleX: number,
+  scaleY: number,
+  size: number
+): EdgeName | null {
+  const half = size / 2
+  const dx = box.x * scaleX
+  const dy = box.y * scaleY
+  const dw = box.width * scaleX
+  const dh = box.height * scaleY
+
+  const px = p.x * scaleX
+  const py = p.y * scaleY
+
+  const edges: Array<{ name: EdgeName; cx: number; cy: number }> = [
+    { name: 'top', cx: dx + dw / 2, cy: dy },
+    { name: 'right', cx: dx + dw, cy: dy + dh / 2 },
+    { name: 'bottom', cx: dx + dw / 2, cy: dy + dh },
+    { name: 'left', cx: dx, cy: dy + dh / 2 },
+  ]
+  const found = edges.find((edge) => Math.abs(px - edge.cx) <= half && Math.abs(py - edge.cy) <= half)
+  return found ? found.name : null
+}
+
 function applyResize(
   original: Annotation,
-  corner: CornerName,
+  handle: ResizeHandle,
   p: Point,
   naturalSize: { width: number; height: number } | null,
   minSize = 5
@@ -128,7 +156,7 @@ function applyResize(
   const right = original.x + original.width
   const bottom = original.y + original.height
   let { x, y, width, height } = original
-  switch (corner) {
+  switch (handle) {
     case 'top-left':
       x = Math.min(px, right - minSize)
       y = Math.min(py, bottom - minSize)
@@ -148,6 +176,20 @@ function applyResize(
     case 'bottom-right':
       width = Math.max(minSize, px - original.x)
       height = Math.max(minSize, py - original.y)
+      break
+    case 'top':
+      y = Math.min(py, bottom - minSize)
+      height = bottom - y
+      break
+    case 'bottom':
+      height = Math.max(minSize, py - original.y)
+      break
+    case 'left':
+      x = Math.min(px, right - minSize)
+      width = right - x
+      break
+    case 'right':
+      width = Math.max(minSize, px - original.x)
       break
   }
   return normalizeRect({ ...original, x, y, width, height })
@@ -308,13 +350,17 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
           const handleColor = palette.handleColor || color
           const hs = palette.handleSize
           ctx.fillStyle = handleColor
-          const corners: Point[] = [
+          const handles: Point[] = [
             { x: dx - hs / 2, y: dy - hs / 2 },
             { x: dx + dw - hs / 2, y: dy - hs / 2 },
             { x: dx - hs / 2, y: dy + dh - hs / 2 },
             { x: dx + dw - hs / 2, y: dy + dh - hs / 2 },
+            { x: dx + dw / 2 - hs / 2, y: dy - hs / 2 },
+            { x: dx + dw - hs / 2, y: dy + dh / 2 - hs / 2 },
+            { x: dx + dw / 2 - hs / 2, y: dy + dh - hs / 2 },
+            { x: dx - hs / 2, y: dy + dh / 2 - hs / 2 },
           ]
-          corners.forEach((c) => ctx.fillRect(c.x, c.y, hs, hs))
+          handles.forEach((handle) => ctx.fillRect(handle.x, handle.y, hs, hs))
         }
       }
     })
@@ -415,14 +461,28 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
     if (editingEnabled && selectionEnabled) {
       const cornerHit = annotations
         .filter((a) => a.isSelected)
-        .map((a) => ({ a, corner: hitCorner(a, p, scaleX, scaleY, palette.handleSize) }))
-        .find((x) => x.corner !== null)
-      if (cornerHit && cornerHit.corner) {
+        .map((a) => ({ a, handle: hitCorner(a, p, scaleX, scaleY, palette.handleSize) }))
+        .find((x) => x.handle !== null)
+      if (cornerHit && cornerHit.handle) {
         setInteraction({
           kind: 'resize',
           boxId: cornerHit.a.id,
-          corner: cornerHit.corner,
+          handle: cornerHit.handle,
           original: cornerHit.a,
+        })
+        return
+      }
+
+      const edgeHit = annotations
+        .filter((a) => a.isSelected)
+        .map((a) => ({ a, handle: hitEdge(a, p, scaleX, scaleY, palette.handleSize) }))
+        .find((x) => x.handle !== null)
+      if (edgeHit && edgeHit.handle) {
+        setInteraction({
+          kind: 'resize',
+          boxId: edgeHit.a.id,
+          handle: edgeHit.handle,
+          original: edgeHit.a,
         })
         return
       }
@@ -493,14 +553,23 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
     if (!interaction) {
       // Hover effects
       if (editingEnabled && selectionEnabled) {
-        const cornerHit = annotations
-          .filter((a) => a.isSelected)
+        const selectedAnnotations = annotations.filter((a) => a.isSelected)
+        const cornerHit = selectedAnnotations
           .map((a) => hitCorner(a, p, scaleX, scaleY, palette.handleSize))
-          .find((c) => c !== null)
+          .find((handle) => handle !== null)
 
         if (cornerHit) {
           canvas.style.cursor =
             cornerHit === 'top-left' || cornerHit === 'bottom-right' ? 'nwse-resize' : 'nesw-resize'
+          return
+        }
+
+        const edgeHit = selectedAnnotations
+          .map((a) => hitEdge(a, p, scaleX, scaleY, palette.handleSize))
+          .find((handle) => handle !== null)
+
+        if (edgeHit) {
+          canvas.style.cursor = edgeHit === 'top' || edgeHit === 'bottom' ? 'ns-resize' : 'ew-resize'
           return
         }
       }
@@ -536,7 +605,7 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
     }
 
     if (interaction.kind === 'resize') {
-      const updated = applyResize(interaction.original, interaction.corner, p, naturalSize)
+      const updated = applyResize(interaction.original, interaction.handle, p, naturalSize)
       const next = annotations.map((a) => (a.id === interaction.boxId ? { ...updated, isSelected: a.isSelected } : a))
       commitChange(next)
       return
