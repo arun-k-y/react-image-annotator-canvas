@@ -90,4 +90,17 @@ export interface ImageAnnotatorProps {
 
   /** Override visual defaults. */
   theme?: AnnotatorTheme
+
+  /**
+   * When true, all annotation coordinates (x, y, width, height) are rounded to
+   * integers before being emitted via `onChange`. Affects draw, move, resize, and
+   * keyboard-nudge. Default: false (preserve current float behaviour).
+   */
+  integerCoordinates?: boolean
+
+  /** When true, dragging/resizing snaps box edges to other boxes and image borders. Default: false. */
+  snapToEdges?: boolean
+
+  /** Snapping distance in image pixels. Only effective when snapToEdges is true. Default: 8. */
+  snapThreshold?: number
 }

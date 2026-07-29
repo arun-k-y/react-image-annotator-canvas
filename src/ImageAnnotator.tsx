@@ -9,6 +9,8 @@ import { DEFAULT_CLOSE_ICON } from './closeIcon'
 
 type Id = string | number
 type CornerName = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+type EdgeName = 'top' | 'right' | 'bottom' | 'left'
+type ResizeHandle = CornerName | EdgeName
 
 interface Point {
   x: number
@@ -24,7 +26,7 @@ interface Draft {
 
 type Interaction =
   | { kind: 'draw'; draft: Draft }
-  | { kind: 'resize'; boxId: Id; corner: CornerName; original: Annotation }
+  | { kind: 'resize'; boxId: Id; handle: ResizeHandle; original: Annotation }
   | {
       kind: 'move'
       boxId: Id
@@ -35,6 +37,7 @@ type Interaction =
       started: boolean
       additive: boolean
       originallySelected: boolean
+      movingBoxes: Array<{ id: Id; x: number; y: number; width: number; height: number }>
     }
 
 type Press =
@@ -111,9 +114,35 @@ function hitCorner(
   return found ? found.name : null
 }
 
+function hitEdge(
+  box: Annotation,
+  p: Point,
+  scaleX: number,
+  scaleY: number,
+  size: number
+): EdgeName | null {
+  const half = size / 2
+  const dx = box.x * scaleX
+  const dy = box.y * scaleY
+  const dw = box.width * scaleX
+  const dh = box.height * scaleY
+
+  const px = p.x * scaleX
+  const py = p.y * scaleY
+
+  const edges: Array<{ name: EdgeName; cx: number; cy: number }> = [
+    { name: 'top', cx: dx + dw / 2, cy: dy },
+    { name: 'right', cx: dx + dw, cy: dy + dh / 2 },
+    { name: 'bottom', cx: dx + dw / 2, cy: dy + dh },
+    { name: 'left', cx: dx, cy: dy + dh / 2 },
+  ]
+  const found = edges.find((edge) => Math.abs(px - edge.cx) <= half && Math.abs(py - edge.cy) <= half)
+  return found ? found.name : null
+}
+
 function applyResize(
   original: Annotation,
-  corner: CornerName,
+  handle: ResizeHandle,
   p: Point,
   naturalSize: { width: number; height: number } | null,
   minSize = 5
@@ -128,7 +157,7 @@ function applyResize(
   const right = original.x + original.width
   const bottom = original.y + original.height
   let { x, y, width, height } = original
-  switch (corner) {
+  switch (handle) {
     case 'top-left':
       x = Math.min(px, right - minSize)
       y = Math.min(py, bottom - minSize)
@@ -149,8 +178,174 @@ function applyResize(
       width = Math.max(minSize, px - original.x)
       height = Math.max(minSize, py - original.y)
       break
+    case 'top':
+      y = Math.min(py, bottom - minSize)
+      height = bottom - y
+      break
+    case 'bottom':
+      height = Math.max(minSize, py - original.y)
+      break
+    case 'left':
+      x = Math.min(px, right - minSize)
+      width = right - x
+      break
+    case 'right':
+      width = Math.max(minSize, px - original.x)
+      break
   }
   return normalizeRect({ ...original, x, y, width, height })
+}
+
+function snapEdges(
+  movingEdges: { left: number; right: number; top: number; bottom: number },
+  otherBoxes: Array<{ x: number; y: number; width: number; height: number }>,
+  imageBounds: { width: number; height: number } | null,
+  threshold: number
+): { dx: number; dy: number } {
+  // Same-type edges (left→left, right→right) = alignment → no offset.
+  // Opposite-type edges (left→right, right→left) = adjacent → ±1 offset so boxes don't share a pixel.
+  // Image borders: always flush, no offset.
+
+  const snapAxis = (
+    movingNear: number,   // left or top edge of moving box
+    movingFar: number,    // right or bottom edge of moving box
+    sameEdges: number[],  // same-type edges from other boxes (lefts/tops)
+    oppositeEdges: number[], // opposite-type edges (rights/bottoms)
+    borderTargets: number[]
+  ): number => {
+    let bestAdjustment = 0
+    let bestDistance = Infinity
+
+    const trySnap = (edge: number, target: number, offset: number) => {
+      const adjustment = target + offset - edge
+      const distance = Math.abs(adjustment)
+      if (distance <= threshold && distance < bestDistance) {
+        bestDistance = distance
+        bestAdjustment = adjustment
+      }
+    }
+
+    // Moving near edge (left/top):
+    //   to same-type edge (left→left / top→top) → alignment, no offset
+    //   to opposite-type edge (left→right / top→bottom) → adjacent, +1 offset
+    for (const t of sameEdges) trySnap(movingNear, t, 0)
+    for (const t of oppositeEdges) trySnap(movingNear, t, 1)
+
+    // Moving far edge (right/bottom):
+    //   to same-type edge (right→right / bottom→bottom) → alignment, no offset
+    //   to opposite-type edge (right→left / bottom→top) → adjacent, -1 offset
+    for (const t of oppositeEdges) trySnap(movingFar, t, 0)
+    for (const t of sameEdges) trySnap(movingFar, t, -1)
+
+    // Image borders: no offset on either edge
+    for (const t of borderTargets) {
+      trySnap(movingNear, t, 0)
+      trySnap(movingFar, t, 0)
+    }
+
+    return bestAdjustment
+  }
+
+  const borderX = imageBounds ? [0, imageBounds.width] : [0]
+  const borderY = imageBounds ? [0, imageBounds.height] : [0]
+  const boxLefts = otherBoxes.map((box) => box.x)
+  const boxRights = otherBoxes.map((box) => box.x + box.width)
+  const boxTops = otherBoxes.map((box) => box.y)
+  const boxBottoms = otherBoxes.map((box) => box.y + box.height)
+
+  return {
+    dx: snapAxis(movingEdges.left, movingEdges.right, boxLefts, boxRights, borderX),
+    dy: snapAxis(movingEdges.top, movingEdges.bottom, boxTops, boxBottoms, borderY),
+  }
+}
+
+function closestSnapTarget(
+  edge: number,
+  sameEdges: number[],
+  oppositeEdges: number[],
+  borderTargets: number[],
+  threshold: number,
+  isNearEdge: boolean
+): number | null {
+  // isNearEdge = true: edge is left/top → opposite gets +1
+  // isNearEdge = false: edge is right/bottom → opposite gets -1
+  const offset = isNearEdge ? 1 : -1
+  let closest: { distance: number; target: number } | null = null
+
+  // Same-type edge: alignment, no offset
+  for (const target of sameEdges) {
+    const distance = Math.abs(edge - target)
+    if (distance <= threshold && (closest === null || distance < closest.distance)) {
+      closest = { distance, target }
+    }
+  }
+  // Opposite-type edge: adjacent, ±1 offset
+  for (const target of oppositeEdges) {
+    const adjustedTarget = target + offset
+    const distance = Math.abs(edge - adjustedTarget)
+    if (distance <= threshold && (closest === null || distance < closest.distance)) {
+      closest = { distance, target: adjustedTarget }
+    }
+  }
+  // Image borders: no offset
+  for (const target of borderTargets) {
+    const distance = Math.abs(edge - target)
+    if (distance <= threshold && (closest === null || distance < closest.distance)) {
+      closest = { distance, target }
+    }
+  }
+  return closest?.target ?? null
+}
+
+function snapResizedRect(
+  rect: Annotation,
+  handle: ResizeHandle,
+  otherBoxes: Array<{ x: number; y: number; width: number; height: number }>,
+  imageBounds: { width: number; height: number } | null,
+  threshold: number,
+  minSize = 5
+): Annotation {
+  const boxLefts = otherBoxes.map((box) => box.x)
+  const boxRights = otherBoxes.map((box) => box.x + box.width)
+  const boxTops = otherBoxes.map((box) => box.y)
+  const boxBottoms = otherBoxes.map((box) => box.y + box.height)
+  const borderX = imageBounds ? [0, imageBounds.width] : [0]
+  const borderY = imageBounds ? [0, imageBounds.height] : [0]
+
+  let { x, y, width, height } = rect
+  if (handle.includes('left')) {
+    // left edge is a "near" edge → opposite (right) edges get +1
+    const target = closestSnapTarget(x, boxLefts, boxRights, borderX, threshold, true)
+    if (target !== null) {
+      const right = x + width
+      x = Math.min(target, right - minSize)
+      width = right - x
+    }
+  } else if (handle.includes('right')) {
+    // right edge is a "far" edge → opposite (left) edges get -1
+    const target = closestSnapTarget(x + width, boxRights, boxLefts, borderX, threshold, false)
+    if (target !== null) {
+      const right = Math.max(target, x + minSize)
+      width = right - x
+    }
+  }
+
+  if (handle.includes('top')) {
+    const target = closestSnapTarget(y, boxTops, boxBottoms, borderY, threshold, true)
+    if (target !== null) {
+      const bottom = y + height
+      y = Math.min(target, bottom - minSize)
+      height = bottom - y
+    }
+  } else if (handle.includes('bottom')) {
+    const target = closestSnapTarget(y + height, boxBottoms, boxTops, borderY, threshold, false)
+    if (target !== null) {
+      const bottom = Math.max(target, y + minSize)
+      height = bottom - y
+    }
+  }
+
+  return normalizeRect({ ...rect, x, y, width, height })
 }
 
 function buildCategoryIndex(categories: Category[] | undefined): Map<string, Category> {
@@ -171,6 +366,9 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
   showLabels = false,
   onSelect,
   theme,
+  integerCoordinates = false,
+  snapToEdges = false,
+  snapThreshold = 8,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const wrapperRef = useRef<HTMLDivElement | null>(null)
@@ -193,6 +391,11 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
       onChange(next)
     },
     [onChange]
+  )
+
+  const roundIfNeeded = useCallback(
+    (n: number): number => (integerCoordinates ? Math.round(n) : n),
+    [integerCoordinates]
   )
 
   const selectionEnabled = selectionMode !== 'none'
@@ -308,13 +511,17 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
           const handleColor = palette.handleColor || color
           const hs = palette.handleSize
           ctx.fillStyle = handleColor
-          const corners: Point[] = [
+          const handles: Point[] = [
             { x: dx - hs / 2, y: dy - hs / 2 },
             { x: dx + dw - hs / 2, y: dy - hs / 2 },
             { x: dx - hs / 2, y: dy + dh - hs / 2 },
             { x: dx + dw - hs / 2, y: dy + dh - hs / 2 },
+            { x: dx + dw / 2 - hs / 2, y: dy - hs / 2 },
+            { x: dx + dw - hs / 2, y: dy + dh / 2 - hs / 2 },
+            { x: dx + dw / 2 - hs / 2, y: dy + dh - hs / 2 },
+            { x: dx - hs / 2, y: dy + dh / 2 - hs / 2 },
           ]
-          corners.forEach((c) => ctx.fillRect(c.x, c.y, hs, hs))
+          handles.forEach((handle) => ctx.fillRect(handle.x, handle.y, hs, hs))
         }
       }
     })
@@ -415,14 +622,28 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
     if (editingEnabled && selectionEnabled) {
       const cornerHit = annotations
         .filter((a) => a.isSelected)
-        .map((a) => ({ a, corner: hitCorner(a, p, scaleX, scaleY, palette.handleSize) }))
-        .find((x) => x.corner !== null)
-      if (cornerHit && cornerHit.corner) {
+        .map((a) => ({ a, handle: hitCorner(a, p, scaleX, scaleY, palette.handleSize) }))
+        .find((x) => x.handle !== null)
+      if (cornerHit && cornerHit.handle) {
         setInteraction({
           kind: 'resize',
           boxId: cornerHit.a.id,
-          corner: cornerHit.corner,
+          handle: cornerHit.handle,
           original: cornerHit.a,
+        })
+        return
+      }
+
+      const edgeHit = annotations
+        .filter((a) => a.isSelected)
+        .map((a) => ({ a, handle: hitEdge(a, p, scaleX, scaleY, palette.handleSize) }))
+        .find((x) => x.handle !== null)
+      if (edgeHit && edgeHit.handle) {
+        setInteraction({
+          kind: 'resize',
+          boxId: edgeHit.a.id,
+          handle: edgeHit.handle,
+          original: edgeHit.a,
         })
         return
       }
@@ -446,6 +667,9 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
               started: false,
               additive,
               originallySelected: true,
+              movingBoxes: annotations
+                .filter((candidate) => candidate.isSelected)
+                .map(({ id, x, y, width, height }) => ({ id, x, y, width, height })),
             })
           } else {
             pressRef.current = { kind: 'select', boxId: a.id, additive }
@@ -466,6 +690,7 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
               started: false,
               additive,
               originallySelected: false,
+              movingBoxes: [{ id: a.id, x: a.x, y: a.y, width: a.width, height: a.height }],
             })
           }
           return
@@ -493,14 +718,23 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
     if (!interaction) {
       // Hover effects
       if (editingEnabled && selectionEnabled) {
-        const cornerHit = annotations
-          .filter((a) => a.isSelected)
+        const selectedAnnotations = annotations.filter((a) => a.isSelected)
+        const cornerHit = selectedAnnotations
           .map((a) => hitCorner(a, p, scaleX, scaleY, palette.handleSize))
-          .find((c) => c !== null)
+          .find((handle) => handle !== null)
 
         if (cornerHit) {
           canvas.style.cursor =
             cornerHit === 'top-left' || cornerHit === 'bottom-right' ? 'nwse-resize' : 'nesw-resize'
+          return
+        }
+
+        const edgeHit = selectedAnnotations
+          .map((a) => hitEdge(a, p, scaleX, scaleY, palette.handleSize))
+          .find((handle) => handle !== null)
+
+        if (edgeHit) {
+          canvas.style.cursor = edgeHit === 'top' || edgeHit === 'bottom' ? 'ns-resize' : 'ew-resize'
           return
         }
       }
@@ -536,31 +770,77 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
     }
 
     if (interaction.kind === 'resize') {
-      const updated = applyResize(interaction.original, interaction.corner, p, naturalSize)
-      const next = annotations.map((a) => (a.id === interaction.boxId ? { ...updated, isSelected: a.isSelected } : a))
+      let updated = applyResize(interaction.original, interaction.handle, p, naturalSize)
+      if (snapToEdges) {
+        const otherBoxes = annotations
+          .filter((a) => a.id !== interaction.boxId)
+          .map(({ x, y, width, height }) => ({ x, y, width, height }))
+        updated = snapResizedRect(updated, interaction.handle, otherBoxes, naturalSize, snapThreshold)
+      }
+      const rounded = {
+        ...updated,
+        x: roundIfNeeded(updated.x),
+        y: roundIfNeeded(updated.y),
+        width: roundIfNeeded(updated.width),
+        height: roundIfNeeded(updated.height),
+      }
+      const next = annotations.map((a) => (a.id === interaction.boxId ? { ...rounded, isSelected: a.isSelected } : a))
       commitChange(next)
       return
     }
 
     if (interaction.kind === 'move') {
-      const dx = p.x - interaction.startX
-      const dy = p.y - interaction.startY
-      if (!interaction.started && Math.hypot(dx, dy) < DRAG_THRESHOLD) return
+      const rawDx = p.x - interaction.startX
+      const rawDy = p.y - interaction.startY
+      if (!interaction.started && Math.hypot(rawDx, rawDy) < DRAG_THRESHOLD) return
 
-      let targetX = interaction.originalX + dx
-      let targetY = interaction.originalY + dy
-
-      if (naturalSize) {
-        const box = annotations.find((a) => a.id === interaction.boxId)
-        if (box) {
-          targetX = Math.max(0, Math.min(naturalSize.width - box.width, targetX))
-          targetY = Math.max(0, Math.min(naturalSize.height - box.height, targetY))
-        }
+      let finalDx = rawDx
+      let finalDy = rawDy
+      if (snapToEdges) {
+        const movingEdges = interaction.movingBoxes.reduce(
+          (edges, box) => ({
+            left: Math.min(edges.left, box.x + rawDx),
+            right: Math.max(edges.right, box.x + box.width + rawDx),
+            top: Math.min(edges.top, box.y + rawDy),
+            bottom: Math.max(edges.bottom, box.y + box.height + rawDy),
+          }),
+          { left: Infinity, right: -Infinity, top: Infinity, bottom: -Infinity }
+        )
+        const movingIds = new Set(interaction.movingBoxes.map((box) => box.id))
+        const otherBoxes = annotations
+          .filter((a) => !movingIds.has(a.id))
+          .map(({ x, y, width, height }) => ({ x, y, width, height }))
+        const adjustment = snapEdges(movingEdges, otherBoxes, naturalSize, snapThreshold)
+        finalDx += adjustment.dx
+        finalDy += adjustment.dy
       }
 
-      const next = annotations.map((a) =>
-        a.id === interaction.boxId ? { ...a, x: targetX, y: targetY } : a
-      )
+      if (naturalSize) {
+        const bounds = interaction.movingBoxes.reduce(
+          (box, moving) => ({
+            left: Math.min(box.left, moving.x),
+            right: Math.max(box.right, moving.x + moving.width),
+            top: Math.min(box.top, moving.y),
+            bottom: Math.max(box.bottom, moving.y + moving.height),
+          }),
+          { left: Infinity, right: -Infinity, top: Infinity, bottom: -Infinity }
+        )
+        finalDx = Math.max(-bounds.left, Math.min(naturalSize.width - bounds.right, finalDx))
+        finalDy = Math.max(-bounds.top, Math.min(naturalSize.height - bounds.bottom, finalDy))
+      }
+
+      const movingIds = new Set(interaction.movingBoxes.map((box) => box.id))
+      const originalById = new Map(interaction.movingBoxes.map((box) => [box.id, box]))
+      const next = annotations.map((a) => {
+        const original = originalById.get(a.id)
+        return original && movingIds.has(a.id)
+          ? {
+              ...a,
+              x: roundIfNeeded(original.x + finalDx),
+              y: roundIfNeeded(original.y + finalDy),
+            }
+          : a
+      })
       setInteraction({ ...interaction, started: true })
       commitChange(next)
     }
@@ -592,10 +872,10 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
               typeof crypto !== 'undefined' && 'randomUUID' in crypto
                 ? crypto.randomUUID()
                 : `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-            x,
-            y,
-            width: w,
-            height: h,
+            x: roundIfNeeded(x),
+            y: roundIfNeeded(y),
+            width: roundIfNeeded(w),
+            height: roundIfNeeded(h),
             categoryId: activeCategoryId,
             isSelected: false,
           }
@@ -674,7 +954,7 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
           targetX = Math.max(0, Math.min(naturalSize.width - a.width, targetX))
           targetY = Math.max(0, Math.min(naturalSize.height - a.height, targetY))
         }
-        return { ...a, x: targetX, y: targetY }
+        return { ...a, x: roundIfNeeded(targetX), y: roundIfNeeded(targetY) }
       })
       commitChange(next)
     }
