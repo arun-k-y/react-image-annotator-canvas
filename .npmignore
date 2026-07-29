@@ -1,7 +1,0 @@
-src
-example
-node_modules
-tsconfig.json
-tsup.config.ts
-.gitignore
-*.log
