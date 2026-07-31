@@ -1,6 +1,6 @@
 {
   "name": "react-image-annotator-canvas",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A generic React canvas component for drawing, selecting, moving, resizing, and labeling rectangular annotations on images. Bring your own categories — use it for ML labeling, visual-diff QA, manuscript markup, or any image-annotation workflow.",
   "keywords": [
     "react",

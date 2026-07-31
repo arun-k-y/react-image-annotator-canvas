@@ -4,6 +4,19 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-07-31
+
+### Added
+- **Edge Resize Handles:** Native edge handles (top, bottom, left, right) with directional cursor feedback in addition to corner handles.
+- **Integer Coordinates (`integerCoordinates`):** Prop to automatically round all annotation coordinates (`x`, `y`, `width`, `height`) to integers.
+- **Edge Snapping (`snapToEdges`, `snapThreshold`):** Magnetically snap annotation edges to other boxes and image borders during dragging or resizing, including multi-select group snapping.
+- **Documentation & Workflows:** Updated README with live demo link and comprehensive prop/type references; added PR preview deployments.
+
+## [0.1.1] - 2026-07-29
+
+### Fixed
+- Internal package build and dependency updates.
+
 ## [0.1.0] - Initial release
 
 First public version.

@@ -1,10 +1,8 @@
 # react-image-annotator-canvas
 
-**[Live Demo](https://pemre.github.io/react-image-annotator-canvas/)**
+**[Live Demo](https://arun-k-y.github.io/react-image-annotator-canvas/)**
 
 A small, dependency-free React component for drawing rectangular annotations on an image via an HTML canvas. Define your own categories — the library is intentionally not opinionated about what an annotation *means*.
-
-> **Note:** This is a fork of [arun-k-y/react-image-annotator-canvas](https://github.com/arun-k-y/react-image-annotator-canvas). Changes and improvements are contributed back to the original repository where possible.
 
 Use it for:
 
@@ -113,6 +111,18 @@ interface Category {
   color: string           // any CSS color
   fillOpacity?: number    // 0–1, defaults to 0.35
 }
+
+interface AnnotatorTheme {
+  selectionStroke?: string
+  selectionStrokeWidth?: number
+  draftFill?: string
+  draftStroke?: string
+  handleColor?: string
+  handleSize?: number
+  labelTextColor?: string
+  labelBackgroundOpacity?: number
+  fallbackColor?: string
+}
 ```
 
 Coordinates are in the image's natural pixel space, so values stay stable regardless of how the image is displayed.
@@ -130,7 +140,7 @@ interactions below work identically with a mouse, trackpad, stylus, or finger.
 | Shift/Cmd/Ctrl-click an annotation (multi mode)   | Toggles its inclusion in the current selection.                         |
 | Click empty space                                 | Clears the selection.                                                   |
 | Click the red X on a selected annotation          | Deletes the annotation. Requires `editingEnabled`.                      |
-| Drag a corner handle of a selected annotation     | Resizes from that corner. Requires `editingEnabled`.                    |
+| Drag a corner or edge handle of a selected box   | Resizes from that corner or edge. Requires `editingEnabled`.           |
 | Drag the body of a selected annotation            | Moves the annotation. Requires `editingEnabled`.                        |
 | Click-and-drag on empty area                      | Draws a new annotation in `activeCategoryId`. Requires `drawingEnabled`. |
 
